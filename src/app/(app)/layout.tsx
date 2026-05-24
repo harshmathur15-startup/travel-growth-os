@@ -1,5 +1,6 @@
 import Sidebar from "@/components/layout/Sidebar";
-import { Bell, Search, Sun } from "lucide-react";
+import { ThemeToggle } from "@/components/ui/ThemeToggle";
+import { Bell, Search } from "lucide-react";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -16,9 +17,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             />
           </div>
           <div className="flex items-center gap-3">
-            <button className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-muted/50 text-muted-foreground hover:bg-muted transition-colors">
-              <Sun className="h-4 w-4" />
-            </button>
+            <ThemeToggle />
             <button className="relative flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-muted/50 text-muted-foreground hover:bg-muted transition-colors">
               <Bell className="h-4 w-4" />
               <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-indigo-500" />
