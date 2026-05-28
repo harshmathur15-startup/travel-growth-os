@@ -757,17 +757,21 @@ export default function HomePage() {
               </span>
             </div>
             <div className="flex flex-wrap items-center justify-center gap-6 text-xs text-muted-foreground">
-              {["Features", "Pricing", "Privacy", "Terms", "Contact"].map(
-                (item) => (
-                  <a
-                    key={item}
-                    href="#"
-                    className="hover:text-foreground transition-colors"
-                  >
-                    {item}
-                  </a>
-                ),
-              )}
+              {[
+                { label: "Features", href: "#features" },
+                { label: "Pricing", href: "#pricing" },
+                { label: "Privacy", href: "/privacy" },
+                { label: "Terms", href: "/terms" },
+                { label: "Contact", href: "/auth/signup" },
+              ].map(({ label, href }) => (
+                <a
+                  key={label}
+                  href={href}
+                  className="hover:text-foreground transition-colors"
+                >
+                  {label}
+                </a>
+              ))}
             </div>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Users className="h-3.5 w-3.5" />
