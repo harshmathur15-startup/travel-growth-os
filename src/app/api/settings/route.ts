@@ -69,6 +69,12 @@ export async function PATCH(req: Request) {
   if (!user)
     return NextResponse.json({ error: "User not found" }, { status: 404 });
 
+  const competitorUrls: string[] = Array.isArray(body.competitor_urls)
+    ? (body.competitor_urls as string[])
+        .filter((u: string) => u?.trim())
+        .slice(0, 3)
+    : [];
+
   const { error } = await db
     .from("businesses")
     .update({
@@ -78,6 +84,7 @@ export async function PATCH(req: Request) {
       city,
       instagram: instagram || null,
       google_business: google_business || null,
+      competitor_urls: competitorUrls,
     })
     .eq("user_id", user.id);
 

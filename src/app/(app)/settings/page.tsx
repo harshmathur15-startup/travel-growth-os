@@ -48,6 +48,7 @@ type SettingsData = {
     city: string;
     instagram: string | null;
     google_business: string | null;
+    competitor_urls: string[] | null;
   } | null;
 };
 
@@ -96,6 +97,7 @@ export default function SettingsPage() {
     city: "",
     instagram: "",
     google_business: "",
+    competitor_urls: ["", "", ""],
   });
   const [saving, setSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "error">(
@@ -110,6 +112,7 @@ export default function SettingsPage() {
       .then((d: SettingsData) => {
         setData(d);
         if (d.business) {
+          const urls = d.business.competitor_urls ?? [];
           setForm({
             name: d.business.name,
             website_url: d.business.website_url,
@@ -117,6 +120,7 @@ export default function SettingsPage() {
             city: d.business.city,
             instagram: d.business.instagram ?? "",
             google_business: d.business.google_business ?? "",
+            competitor_urls: [urls[0] ?? "", urls[1] ?? "", urls[2] ?? ""],
           });
         }
         setLoading(false);
@@ -131,7 +135,10 @@ export default function SettingsPage() {
       const res = await fetch("/api/settings", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          ...form,
+          competitor_urls: form.competitor_urls.filter((u) => u.trim()),
+        }),
       });
       if (res.ok) {
         setSaveStatus("saved");
@@ -143,6 +150,7 @@ export default function SettingsPage() {
                   ...form,
                   instagram: form.instagram || null,
                   google_business: form.google_business || null,
+                  competitor_urls: form.competitor_urls.filter((u) => u.trim()),
                 },
               }
             : prev,
@@ -303,7 +311,7 @@ export default function SettingsPage() {
                         {label}
                       </label>
                       <input
-                        value={form[key as keyof typeof form]}
+                        value={form[key as keyof typeof form] as string}
                         onChange={(e) =>
                           setForm((f) => ({ ...f, [key]: e.target.value }))
                         }
@@ -330,6 +338,39 @@ export default function SettingsPage() {
                       ))}
                     </select>
                   </div>
+                </div>
+              </div>
+
+              {/* Competitor Analysis */}
+              <div className="rounded-2xl border border-border bg-card p-6">
+                <h2 className="text-sm font-semibold text-foreground mb-1">
+                  Competitor Analysis
+                </h2>
+                <p className="text-xs text-muted-foreground mb-5">
+                  Add up to 3 competitor websites. The AI audit will benchmark
+                  your digital presence against theirs.
+                </p>
+                <div className="space-y-3">
+                  {form.competitor_urls.map((url, i) => (
+                    <div key={i}>
+                      <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                        Competitor {i + 1}{" "}
+                        <span className="text-muted-foreground/50">
+                          (optional)
+                        </span>
+                      </label>
+                      <input
+                        value={url}
+                        onChange={(e) => {
+                          const next = [...form.competitor_urls];
+                          next[i] = e.target.value;
+                          setForm((f) => ({ ...f, competitor_urls: next }));
+                        }}
+                        placeholder="https://competitor.in"
+                        className="w-full rounded-xl border border-border bg-muted/30 px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                      />
+                    </div>
+                  ))}
                 </div>
               </div>
 
@@ -384,7 +425,6 @@ export default function SettingsPage() {
           {/* ── Billing ── */}
           {active === "billing" && (
             <div className="space-y-4">
-              {/* Current plan */}
               <div className="rounded-2xl border border-border bg-card p-6">
                 <h2 className="text-sm font-semibold text-foreground mb-4">
                   Current Plan
@@ -413,7 +453,6 @@ export default function SettingsPage() {
                 </div>
               </div>
 
-              {/* Upgrade card — only shown for free users */}
               {!isPro && (
                 <div className="rounded-2xl border border-indigo-500/20 bg-card p-6">
                   <h2 className="text-sm font-semibold text-foreground mb-1">
@@ -434,6 +473,8 @@ export default function SettingsPage() {
                         "Unlimited AI audits every month",
                         "Full recommendations report",
                         "All 6 growth dimensions",
+                        "Competitor benchmarking",
+                        "PageSpeed performance data",
                         "Audit history & trend tracking",
                         "Priority support",
                       ].map((f) => (

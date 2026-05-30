@@ -39,6 +39,36 @@ type SocialSignals = {
   googleBusinessReachable: boolean;
 };
 
+type PageSpeedMetrics = {
+  score: number;
+  lcp: number;
+  cls: number;
+  fcp: number;
+};
+
+type PageSpeedData = {
+  mobile: PageSpeedMetrics | null;
+  desktop: PageSpeedMetrics | null;
+};
+
+type CompetitorAnalysis = {
+  url: string;
+  reachable: boolean;
+  https: boolean;
+  hasWhatsApp: boolean;
+  hasPhone: boolean;
+  hasEmail: boolean;
+  hasTestimonials: boolean;
+  hasGoogleAnalytics: boolean;
+  hasFacebookPixel: boolean;
+  hasBookingCTA: boolean;
+  hasPricing: boolean;
+  socialLinksFound: string[];
+  wordCount: number;
+  estimatedScore: number;
+  destinationMentions: string[];
+};
+
 const BOOKING_KEYWORDS =
   /book\s*now|enquire|enquiry|get\s*quote|request\s*quote|contact\s*us|call\s*us|whatsapp|book\s*tour|plan\s*trip|start\s*planning/i;
 const PRICING_KEYWORDS =
@@ -49,8 +79,6 @@ const GOOGLE_REVIEW_KEYWORDS =
   /google\s*review|google\s*rating|maps\.google|goo\.gl/i;
 const DESTINATION_KEYWORDS =
   /goa|kerala|rajasthan|himachal|ladakh|kashmir|manali|shimla|jaipur|udaipur|andaman|lakshadweep|bali|thailand|dubai|europe|singapore|maldives|spiti|uttarakhand|sikkim|meghalaya/gi;
-const SOCIAL_PLATFORMS =
-  /instagram|facebook|youtube|twitter|linkedin|pinterest/gi;
 
 async function fetchHtml(
   url: string,
@@ -110,7 +138,6 @@ function extractAll(html: string, pattern: RegExp): string[] {
 
 async function analyzeWebsite(rawUrl: string): Promise<WebsiteSignals> {
   const url = rawUrl.startsWith("http") ? rawUrl : `https://${rawUrl}`;
-
   const { html: homeHtml, finalUrl, ok } = await fetchHtml(url);
 
   if (!ok || !homeHtml) {
@@ -142,7 +169,6 @@ async function analyzeWebsite(rawUrl: string): Promise<WebsiteSignals> {
     };
   }
 
-  // Fetch /contact and /about in parallel for more signals
   const [contactResult, aboutResult, sitemapResult] = await Promise.all([
     fetchHtml(`${new URL(finalUrl).origin}/contact`, 5000),
     fetchHtml(`${new URL(finalUrl).origin}/about`, 5000),
@@ -257,6 +283,92 @@ async function checkSocialMedia(
   return results;
 }
 
+async function fetchPageSpeed(url: string): Promise<PageSpeedData> {
+  const apiKey = process.env.GOOGLE_PAGESPEED_API_KEY;
+  const base = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed";
+
+  const run = async (
+    strategy: "mobile" | "desktop",
+  ): Promise<PageSpeedMetrics | null> => {
+    try {
+      const params = new URLSearchParams({
+        url,
+        strategy,
+        category: "performance",
+      });
+      if (apiKey) params.set("key", apiKey);
+      const res = await fetch(`${base}?${params}`, {
+        signal: AbortSignal.timeout(28000),
+      });
+      if (!res.ok) return null;
+      const j = await res.json();
+      const cats = j.lighthouseResult?.categories;
+      const audits = j.lighthouseResult?.audits;
+      if (!cats?.performance) return null;
+      return {
+        score: Math.round((cats.performance.score ?? 0) * 100),
+        lcp: parseFloat(
+          (
+            (audits?.["largest-contentful-paint"]?.numericValue ?? 0) / 1000
+          ).toFixed(1),
+        ),
+        cls: parseFloat(
+          (audits?.["cumulative-layout-shift"]?.numericValue ?? 0).toFixed(3),
+        ),
+        fcp: parseFloat(
+          (
+            (audits?.["first-contentful-paint"]?.numericValue ?? 0) / 1000
+          ).toFixed(1),
+        ),
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  const [mobile, desktop] = await Promise.all([run("mobile"), run("desktop")]);
+  return { mobile, desktop };
+}
+
+function calcEstimatedScore(ws: WebsiteSignals): number {
+  let score = 0;
+  if (ws.https) score += 10;
+  if (ws.hasViewportMeta) score += 10;
+  if (ws.metaDescription) score += 5;
+  if (ws.hasPhone) score += 10;
+  if (ws.hasEmail) score += 5;
+  if (ws.hasWhatsApp) score += 15;
+  if (ws.hasBookingCTA) score += 15;
+  if (ws.hasTestimonials) score += 10;
+  if (ws.hasGoogleAnalytics) score += 10;
+  score += Math.min(ws.socialLinksFound.length * 3, 10);
+  return Math.min(score, 100);
+}
+
+async function analyzeCompetitorBasic(
+  rawUrl: string,
+): Promise<CompetitorAnalysis> {
+  const url = rawUrl.trim();
+  const ws = await analyzeWebsite(url);
+  return {
+    url,
+    reachable: ws.reachable,
+    https: ws.https,
+    hasWhatsApp: ws.hasWhatsApp,
+    hasPhone: ws.hasPhone,
+    hasEmail: ws.hasEmail,
+    hasTestimonials: ws.hasTestimonials,
+    hasGoogleAnalytics: ws.hasGoogleAnalytics,
+    hasFacebookPixel: ws.hasFacebookPixel,
+    hasBookingCTA: ws.hasBookingCTA,
+    hasPricing: ws.hasPricing,
+    socialLinksFound: ws.socialLinksFound,
+    wordCount: ws.wordCount,
+    estimatedScore: calcEstimatedScore(ws),
+    destinationMentions: ws.destinationMentions,
+  };
+}
+
 function buildPrompt(
   business: {
     name: string;
@@ -268,7 +380,40 @@ function buildPrompt(
   },
   ws: WebsiteSignals,
   social: SocialSignals,
+  pagespeed: PageSpeedData,
+  competitors: CompetitorAnalysis[],
 ): string {
+  const psSection = `
+## Page Speed Performance (Google PageSpeed Insights — Real Measured Data)
+Mobile score: ${pagespeed.mobile?.score ?? "Could not fetch"}/100
+${pagespeed.mobile ? `  • LCP: ${pagespeed.mobile.lcp}s ${pagespeed.mobile.lcp <= 2.5 ? "(Good ✓)" : pagespeed.mobile.lcp <= 4 ? "(Needs Improvement ⚠)" : "(Poor ✗)"}` : ""}
+${pagespeed.mobile ? `  • CLS: ${pagespeed.mobile.cls} ${pagespeed.mobile.cls <= 0.1 ? "(Good ✓)" : pagespeed.mobile.cls <= 0.25 ? "(Needs Improvement ⚠)" : "(Poor ✗)"}` : ""}
+${pagespeed.mobile ? `  • FCP: ${pagespeed.mobile.fcp}s` : ""}
+Desktop score: ${pagespeed.desktop?.score ?? "Could not fetch"}/100
+${pagespeed.desktop ? `  • LCP: ${pagespeed.desktop.lcp}s` : ""}
+${pagespeed.desktop ? `  • CLS: ${pagespeed.desktop.cls}` : ""}
+(Benchmarks: LCP ≤2.5s = good, CLS ≤0.1 = good)`;
+
+  const compSection =
+    competitors.length === 0
+      ? "\n## Competitor Benchmarks\nNo competitors configured. Skip comparative recommendations."
+      : `\n## Competitor Benchmarks (same signal extraction applied to competitors)
+${competitors
+  .map(
+    (c) => `
+Competitor: ${c.url} — Estimated readiness score: ${c.estimatedScore}/100
+  • Reachable: ${c.reachable ? "Yes" : "NO"}, HTTPS: ${c.https ? "Yes" : "No"}
+  • WhatsApp: ${c.hasWhatsApp ? "Yes ✓" : "No ✗"} | Phone: ${c.hasPhone ? "Yes ✓" : "No ✗"} | Email: ${c.hasEmail ? "Yes ✓" : "No ✗"}
+  • Booking CTA: ${c.hasBookingCTA ? "Yes ✓" : "No ✗"} | Pricing: ${c.hasPricing ? "Yes ✓" : "No ✗"} | Testimonials: ${c.hasTestimonials ? "Yes ✓" : "No ✗"}
+  • Analytics: ${c.hasGoogleAnalytics ? "Yes ✓" : "No ✗"} | FB Pixel: ${c.hasFacebookPixel ? "Yes ✓" : "No ✗"}
+  • Social links: ${c.socialLinksFound.length > 0 ? c.socialLinksFound.join(", ") : "None"}
+  • Destinations: ${c.destinationMentions.length > 0 ? c.destinationMentions.join(", ") : "None detected"}
+  • Word count: ${c.wordCount}`,
+  )
+  .join("\n")}
+
+When competitors have a signal that the audited business lacks, name it explicitly in findings (e.g. "Competitors X and Y have WhatsApp buttons — you don't").`;
+
   return `You are a senior digital growth consultant specialising in Indian travel businesses. Your job is to score and give honest, specific feedback.
 
 ## Business Profile
@@ -317,13 +462,15 @@ function buildPrompt(
 """
 ${ws.pageTextExcerpt || "No content could be extracted"}
 """
+${psSection}
+${compSection}
 
 ## Scoring Instructions
 Score each dimension 0–100 based ONLY on the signals above. Do not be generous — score what the data shows:
 - SEO: title/meta/h1 presence and quality, schema markup, sitemap, HTTPS, word count
 - Conversion: WhatsApp, phone, email, booking CTA, pricing info, enquiry forms
 - Trust & Reviews: testimonials on site, Google reviews link, analytics tracking, SSL
-- Mobile & Speed: viewport meta, HTTPS, site reachability, mobile-friendly signals
+- Mobile & Speed: USE the Google PageSpeed mobile score as the primary input. If mobile PageSpeed score is available, weight it heavily (70%) alongside viewport meta and HTTPS signals (30%).
 - Social Media: social links found, Instagram reachability/content, Google Business
 - Content Quality: destinations covered, word count, headings structure, pricing/package detail
 
@@ -332,10 +479,10 @@ Return ONLY valid JSON, no markdown, no extra text:
   "overall_score": <weighted average — SEO 20%, Conversion 25%, Trust 15%, Mobile 15%, Social 10%, Content 15%>,
   "summary": "<2-3 sentences naming specific gaps — e.g. missing WhatsApp button, no meta description, Instagram not linked>",
   "dimensions": [
-    { "name": "SEO", "score": <0-100>, "findings": ["<specific finding based on data above>", "<specific finding>", "<specific finding>"], "top_recommendation": "<single most impactful actionable fix>", "impact": "high" },
+    { "name": "SEO", "score": <0-100>, "findings": ["<specific finding>", "<specific finding>", "<specific finding>"], "top_recommendation": "<single most impactful actionable fix>", "impact": "high" },
     { "name": "Conversion", "score": <0-100>, "findings": ["<specific finding>", "<specific finding>", "<specific finding>"], "top_recommendation": "<single most impactful fix>", "impact": "high" },
     { "name": "Trust & Reviews", "score": <0-100>, "findings": ["<specific finding>", "<specific finding>"], "top_recommendation": "<single most impactful fix>", "impact": "medium" },
-    { "name": "Mobile & Speed", "score": <0-100>, "findings": ["<specific finding>", "<specific finding>"], "top_recommendation": "<single most impactful fix>", "impact": "high" },
+    { "name": "Mobile & Speed", "score": <0-100>, "findings": ["<specific finding based on PageSpeed data>", "<specific finding>"], "top_recommendation": "<single most impactful fix>", "impact": "high" },
     { "name": "Social Media", "score": <0-100>, "findings": ["<specific finding>", "<specific finding>"], "top_recommendation": "<single most impactful fix>", "impact": "medium" },
     { "name": "Content Quality", "score": <0-100>, "findings": ["<specific finding>", "<specific finding>"], "top_recommendation": "<single most impactful fix>", "impact": "medium" }
   ]
@@ -404,13 +551,27 @@ export async function POST() {
   if (auditErr)
     return NextResponse.json({ error: auditErr.message }, { status: 500 });
 
-  // Run website analysis and social checks in parallel
-  const [websiteSignals, socialSignals] = await Promise.all([
-    analyzeWebsite(business.website_url),
-    checkSocialMedia(business.instagram, business.google_business),
-  ]);
+  const competitorUrls: string[] = (
+    (business.competitor_urls as string[] | null) ?? []
+  )
+    .filter((u: string) => u?.trim())
+    .slice(0, 3);
 
-  const prompt = buildPrompt(business, websiteSignals, socialSignals);
+  const [websiteSignals, socialSignals, pageSpeedData, competitorData] =
+    await Promise.all([
+      analyzeWebsite(business.website_url),
+      checkSocialMedia(business.instagram, business.google_business),
+      fetchPageSpeed(business.website_url),
+      Promise.all(competitorUrls.map(analyzeCompetitorBasic)),
+    ]);
+
+  const prompt = buildPrompt(
+    business,
+    websiteSignals,
+    socialSignals,
+    pageSpeedData,
+    competitorData,
+  );
 
   let auditResult: {
     overall_score: number;
@@ -475,10 +636,31 @@ export async function POST() {
     })
     .eq("id", user.id);
 
+  const myStats: CompetitorAnalysis = {
+    url: business.website_url,
+    reachable: websiteSignals.reachable,
+    https: websiteSignals.https,
+    hasWhatsApp: websiteSignals.hasWhatsApp,
+    hasPhone: websiteSignals.hasPhone,
+    hasEmail: websiteSignals.hasEmail,
+    hasTestimonials: websiteSignals.hasTestimonials,
+    hasGoogleAnalytics: websiteSignals.hasGoogleAnalytics,
+    hasFacebookPixel: websiteSignals.hasFacebookPixel,
+    hasBookingCTA: websiteSignals.hasBookingCTA,
+    hasPricing: websiteSignals.hasPricing,
+    socialLinksFound: websiteSignals.socialLinksFound,
+    wordCount: websiteSignals.wordCount,
+    estimatedScore: calcEstimatedScore(websiteSignals),
+    destinationMentions: websiteSignals.destinationMentions,
+  };
+
   return NextResponse.json({
     auditId: audit.id,
     overall_score: auditResult.overall_score,
     summary: auditResult.summary,
     dimensions: auditResult.dimensions,
+    pagespeed: pageSpeedData,
+    competitors: competitorData,
+    myStats,
   });
 }

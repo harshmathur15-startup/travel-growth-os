@@ -8,6 +8,8 @@ import {
   Loader2,
   AlertTriangle,
   ArrowRight,
+  Monitor,
+  Smartphone,
 } from "lucide-react";
 
 type Dimension = {
@@ -18,11 +20,42 @@ type Dimension = {
   impact: string;
 };
 
+type PageSpeedMetrics = {
+  score: number;
+  lcp: number;
+  cls: number;
+  fcp: number;
+};
+
+type CompetitorSummary = {
+  url: string;
+  reachable: boolean;
+  https: boolean;
+  hasWhatsApp: boolean;
+  hasPhone: boolean;
+  hasEmail: boolean;
+  hasTestimonials: boolean;
+  hasGoogleAnalytics: boolean;
+  hasFacebookPixel: boolean;
+  hasBookingCTA: boolean;
+  hasPricing: boolean;
+  socialLinksFound: string[];
+  wordCount: number;
+  estimatedScore: number;
+  destinationMentions: string[];
+};
+
 type AuditResult = {
   auditId: string;
   overall_score: number;
   summary: string;
   dimensions: Dimension[];
+  pagespeed?: {
+    mobile: PageSpeedMetrics | null;
+    desktop: PageSpeedMetrics | null;
+  };
+  competitors?: CompetitorSummary[];
+  myStats?: CompetitorSummary;
 };
 
 const auditSteps = [
@@ -30,7 +63,8 @@ const auditSteps = [
   "Analysing SEO & meta tags…",
   "Checking conversion signals…",
   "Reviewing trust & credibility…",
-  "Auditing mobile experience…",
+  "Running PageSpeed analysis…",
+  "Scanning competitor websites…",
   "Evaluating content quality…",
   "Generating AI recommendations…",
 ];
@@ -75,6 +109,54 @@ function ScoreRing({ score }: { score: number }) {
   );
 }
 
+function MetricRow({
+  label,
+  value,
+  good,
+  warn,
+}: {
+  label: string;
+  value: string;
+  good: boolean;
+  warn: boolean;
+}) {
+  const color = good
+    ? "text-emerald-400"
+    : warn
+      ? "text-amber-400"
+      : "text-red-400";
+  return (
+    <div className="flex items-center justify-between text-xs">
+      <span className="text-muted-foreground">{label}</span>
+      <span className={`font-semibold tabular-nums ${color}`}>{value}</span>
+    </div>
+  );
+}
+
+function getDomain(url: string): string {
+  try {
+    const full = url.startsWith("http") ? url : `https://${url}`;
+    return new URL(full).hostname.replace("www.", "");
+  } catch {
+    return url;
+  }
+}
+
+const COMPARISON_SIGNALS: {
+  key: keyof CompetitorSummary;
+  label: string;
+}[] = [
+  { key: "https", label: "HTTPS" },
+  { key: "hasWhatsApp", label: "WhatsApp" },
+  { key: "hasPhone", label: "Phone" },
+  { key: "hasEmail", label: "Email" },
+  { key: "hasBookingCTA", label: "Booking CTA" },
+  { key: "hasPricing", label: "Pricing Info" },
+  { key: "hasTestimonials", label: "Testimonials" },
+  { key: "hasGoogleAnalytics", label: "Analytics" },
+  { key: "hasFacebookPixel", label: "FB Pixel" },
+];
+
 export default function AuditPage() {
   const [step, setStep] = useState<"form" | "running" | "done" | "error">(
     "form",
@@ -88,10 +170,9 @@ export default function AuditPage() {
     setStep("running");
     setStepIndex(0);
 
-    // Animate through steps while API call runs
     const interval = setInterval(() => {
       setStepIndex((i) => (i < auditSteps.length - 1 ? i + 1 : i));
-    }, 700);
+    }, 1200);
 
     try {
       const res = await fetch("/api/audit/run", { method: "POST" });
@@ -145,11 +226,12 @@ export default function AuditPage() {
               Generate AI Audit Now
             </button>
             <p className="text-center text-[11px] text-muted-foreground mt-3">
-              Takes ~15 seconds · Analyses 6 growth dimensions
+              Takes ~30 seconds · Analyses 6 growth dimensions + PageSpeed +
+              competitors
             </p>
             <div className="mt-5 border-t border-border pt-4">
               <p className="text-xs text-muted-foreground">
-                Want to audit a different website?{" "}
+                Want to audit a different website or add competitors?{" "}
                 <Link
                   href="/settings"
                   className="text-indigo-400 hover:underline"
@@ -169,9 +251,10 @@ export default function AuditPage() {
                 "SEO & meta tags",
                 "Conversion & CTAs",
                 "Trust & reviews",
-                "Mobile & page speed",
+                "PageSpeed (real data)",
                 "Social media presence",
                 "Content quality",
+                "Competitor benchmarking",
               ].map((item) => (
                 <div key={item} className="flex items-center gap-2.5">
                   <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
@@ -286,6 +369,197 @@ export default function AuditPage() {
               ))}
             </div>
           </div>
+
+          {/* PageSpeed */}
+          {result.pagespeed &&
+            (result.pagespeed.mobile || result.pagespeed.desktop) && (
+              <div className="rounded-2xl border border-border bg-card p-6">
+                <div className="flex items-center gap-2 mb-4">
+                  <h3 className="text-sm font-semibold text-foreground">
+                    Page Speed Performance
+                  </h3>
+                  <span className="text-[10px] text-muted-foreground bg-muted/30 rounded-full px-2 py-0.5">
+                    via Google PageSpeed Insights
+                  </span>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {(
+                    [
+                      {
+                        label: "Mobile",
+                        data: result.pagespeed.mobile,
+                        Icon: Smartphone,
+                      },
+                      {
+                        label: "Desktop",
+                        data: result.pagespeed.desktop,
+                        Icon: Monitor,
+                      },
+                    ] as const
+                  ).map(({ label, data, Icon }) => (
+                    <div
+                      key={label}
+                      className="rounded-xl border border-border bg-muted/10 p-4"
+                    >
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-1.5">
+                          <Icon className="h-3.5 w-3.5 text-muted-foreground" />
+                          <span className="text-xs font-semibold text-foreground">
+                            {label}
+                          </span>
+                        </div>
+                        {data ? (
+                          <span
+                            className="text-2xl font-black tabular-nums"
+                            style={{ color: scoreColor(data.score) }}
+                          >
+                            {data.score}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">
+                            N/A
+                          </span>
+                        )}
+                      </div>
+                      {data ? (
+                        <div className="space-y-1.5">
+                          <MetricRow
+                            label="LCP"
+                            value={`${data.lcp}s`}
+                            good={data.lcp <= 2.5}
+                            warn={data.lcp <= 4}
+                          />
+                          <MetricRow
+                            label="CLS"
+                            value={`${data.cls}`}
+                            good={data.cls <= 0.1}
+                            warn={data.cls <= 0.25}
+                          />
+                          <MetricRow
+                            label="FCP"
+                            value={`${data.fcp}s`}
+                            good={data.fcp <= 1.8}
+                            warn={data.fcp <= 3}
+                          />
+                        </div>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">
+                          Could not fetch PageSpeed data
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <p className="mt-3 text-[10px] text-muted-foreground">
+                  LCP ≤2.5s · CLS ≤0.1 · FCP ≤1.8s = Good (green)
+                </p>
+              </div>
+            )}
+
+          {/* Competitor comparison */}
+          {result.myStats &&
+            result.competitors &&
+            result.competitors.length > 0 && (
+              <div className="rounded-2xl border border-border bg-card p-6">
+                <h3 className="text-sm font-semibold text-foreground mb-4">
+                  Competitor Benchmarking
+                </h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-border">
+                        <th className="text-left py-2 pr-4 text-muted-foreground font-medium w-32">
+                          Signal
+                        </th>
+                        <th className="text-center py-2 px-3 text-indigo-400 font-semibold">
+                          You
+                          <div className="font-normal text-[10px] text-muted-foreground truncate max-w-[80px] mx-auto">
+                            {getDomain(result.myStats.url)}
+                          </div>
+                        </th>
+                        {result.competitors.map((c, i) => (
+                          <th
+                            key={i}
+                            className="text-center py-2 px-3 text-muted-foreground font-medium"
+                          >
+                            Comp {i + 1}
+                            <div className="font-normal text-[10px] truncate max-w-[80px] mx-auto">
+                              {getDomain(c.url)}
+                            </div>
+                          </th>
+                        ))}
+                      </tr>
+                      <tr className="border-b border-border/50">
+                        <td className="py-2 pr-4 text-muted-foreground">
+                          Est. score
+                        </td>
+                        <td className="text-center py-2 px-3 font-bold text-indigo-400">
+                          {result.myStats.estimatedScore}
+                        </td>
+                        {result.competitors.map((c, i) => (
+                          <td
+                            key={i}
+                            className="text-center py-2 px-3 font-semibold text-muted-foreground"
+                          >
+                            {c.reachable ? c.estimatedScore : "—"}
+                          </td>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {COMPARISON_SIGNALS.map(({ key, label }) => (
+                        <tr
+                          key={key}
+                          className="border-b border-border/30 last:border-0"
+                        >
+                          <td className="py-2 pr-4 text-muted-foreground">
+                            {label}
+                          </td>
+                          <td className="text-center py-2 px-3">
+                            {result.myStats![key] ? (
+                              <span className="text-emerald-400">✓</span>
+                            ) : (
+                              <span className="text-red-400/70">✗</span>
+                            )}
+                          </td>
+                          {result.competitors!.map((c, i) => (
+                            <td key={i} className="text-center py-2 px-3">
+                              {!c.reachable ? (
+                                <span className="text-muted-foreground/40">
+                                  —
+                                </span>
+                              ) : c[key] ? (
+                                <span className="text-emerald-400">✓</span>
+                              ) : (
+                                <span className="text-muted-foreground/40">
+                                  ✗
+                                </span>
+                              )}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                      <tr className="border-t border-border/50">
+                        <td className="py-2 pr-4 text-muted-foreground">
+                          Word count
+                        </td>
+                        <td className="text-center py-2 px-3 text-foreground font-medium">
+                          {result.myStats.wordCount.toLocaleString()}
+                        </td>
+                        {result.competitors.map((c, i) => (
+                          <td
+                            key={i}
+                            className="text-center py-2 px-3 text-muted-foreground"
+                          >
+                            {c.reachable ? c.wordCount.toLocaleString() : "—"}
+                          </td>
+                        ))}
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
 
           {/* Dimension details */}
           <div className="space-y-4">
