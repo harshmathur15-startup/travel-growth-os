@@ -36,7 +36,7 @@ export async function GET() {
       name: user.name,
       plan: user.plan,
       audits_used: auditsUsed,
-      audit_limit: 2,
+      audit_limit: 10,
     },
     business,
   });

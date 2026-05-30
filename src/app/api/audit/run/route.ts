@@ -4,7 +4,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { createServerSupabase } from "@/lib/supabase-server";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-const FREE_AUDIT_LIMIT = 2;
+const FREE_AUDIT_LIMIT = 10;
 
 type WebsiteSignals = {
   reachable: boolean;
