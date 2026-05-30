@@ -1,91 +1,14 @@
-import { Plug, CheckCircle2, AlertCircle } from "lucide-react";
+import { auth } from "@clerk/nextjs/server";
+import { createServerSupabase } from "@/lib/supabase-server";
+import { CheckCircle2, AlertCircle, Clock } from "lucide-react";
 
-const integrations = [
-  {
-    name: "Google Business Profile",
-    icon: "🔍",
-    desc: "Sync reviews, posts, and local ranking data",
-    status: "connected",
-    category: "SEO",
-  },
-  {
-    name: "Google Analytics 4",
-    icon: "📊",
-    desc: "Import traffic data, goals, and conversion events",
-    status: "disconnected",
-    category: "Analytics",
-  },
-  {
-    name: "Google Search Console",
-    icon: "🔎",
-    desc: "Pull keyword rankings and click-through rates",
-    status: "disconnected",
-    category: "SEO",
-  },
-  {
-    name: "Instagram Business",
-    icon: "📸",
-    desc: "Analyse posts, Reels, engagement, and follower growth",
-    status: "connected",
-    category: "Social",
-  },
-  {
-    name: "WhatsApp Business API",
-    icon: "💬",
-    desc: "Track inquiry volume, response rates, and conversions",
-    status: "disconnected",
-    category: "Conversion",
-  },
-  {
-    name: "Facebook Page",
-    icon: "👥",
-    desc: "Monitor reach, engagement, and ad performance",
-    status: "disconnected",
-    category: "Social",
-  },
-  {
-    name: "TripAdvisor",
-    icon: "✈️",
-    desc: "Import review scores and listing performance",
-    status: "disconnected",
-    category: "Trust",
-  },
-  {
-    name: "MakeMyTrip Partner",
-    icon: "🏨",
-    desc: "Sync listing data and booking conversion rates",
-    status: "disconnected",
-    category: "Marketplace",
-  },
-  {
-    name: "Zoho CRM",
-    icon: "📋",
-    desc: "Push qualified leads directly to your CRM pipeline",
-    status: "disconnected",
-    category: "CRM",
-  },
-  {
-    name: "HubSpot",
-    icon: "🧲",
-    desc: "Sync contacts, deals, and automated follow-up sequences",
-    status: "disconnected",
-    category: "CRM",
-  },
-  {
-    name: "Mailchimp",
-    icon: "📧",
-    desc: "Trigger email sequences based on audit insights",
-    status: "disconnected",
-    category: "Email",
-  },
-  {
-    name: "Zapier",
-    icon: "⚡",
-    desc: "Connect 5,000+ apps with no-code automation",
-    status: "disconnected",
-    category: "Automation",
-  },
-];
+type Integration = {
+  name: string;
+  icon: string;
+  desc: string;
+  category: string;
+  status: "connected" | "disconnected" | "coming_soon";
+};
 
 const categoryColors: Record<string, string> = {
   SEO: "bg-indigo-500/10 text-indigo-400",
@@ -99,8 +22,126 @@ const categoryColors: Record<string, string> = {
   Automation: "bg-amber-500/10 text-amber-400",
 };
 
-export default function IntegrationsPage() {
+export default async function IntegrationsPage() {
+  const { userId } = await auth();
+
+  let business: {
+    instagram: string | null;
+    google_business: string | null;
+  } | null = null;
+
+  if (userId) {
+    const db = createServerSupabase();
+    const { data: user } = await db
+      .from("users")
+      .select("id")
+      .eq("clerk_user_id", userId)
+      .single();
+
+    if (user) {
+      const { data } = await db
+        .from("businesses")
+        .select("instagram, google_business")
+        .eq("user_id", user.id)
+        .single();
+      business = data ?? null;
+    }
+  }
+
+  const hasInstagram = !!business?.instagram?.trim();
+  const hasGoogleBusiness = !!business?.google_business?.trim();
+
+  const integrations: Integration[] = [
+    {
+      name: "Google Business Profile",
+      icon: "🔍",
+      desc: "Sync reviews, posts, and local ranking data",
+      status: hasGoogleBusiness ? "connected" : "disconnected",
+      category: "SEO",
+    },
+    {
+      name: "Instagram Business",
+      icon: "📸",
+      desc: "Analyse posts, Reels, engagement, and follower growth",
+      status: hasInstagram ? "connected" : "disconnected",
+      category: "Social",
+    },
+    {
+      name: "Google Analytics 4",
+      icon: "📊",
+      desc: "Import traffic data, goals, and conversion events",
+      status: "coming_soon",
+      category: "Analytics",
+    },
+    {
+      name: "Google Search Console",
+      icon: "🔎",
+      desc: "Pull keyword rankings and click-through rates",
+      status: "coming_soon",
+      category: "SEO",
+    },
+    {
+      name: "WhatsApp Business API",
+      icon: "💬",
+      desc: "Track inquiry volume, response rates, and conversions",
+      status: "coming_soon",
+      category: "Conversion",
+    },
+    {
+      name: "Facebook Page",
+      icon: "👥",
+      desc: "Monitor reach, engagement, and ad performance",
+      status: "coming_soon",
+      category: "Social",
+    },
+    {
+      name: "TripAdvisor",
+      icon: "✈️",
+      desc: "Import review scores and listing performance",
+      status: "coming_soon",
+      category: "Trust",
+    },
+    {
+      name: "MakeMyTrip Partner",
+      icon: "🏨",
+      desc: "Sync listing data and booking conversion rates",
+      status: "coming_soon",
+      category: "Marketplace",
+    },
+    {
+      name: "Zoho CRM",
+      icon: "📋",
+      desc: "Push qualified leads directly to your CRM pipeline",
+      status: "coming_soon",
+      category: "CRM",
+    },
+    {
+      name: "HubSpot",
+      icon: "🧲",
+      desc: "Sync contacts, deals, and automated follow-up sequences",
+      status: "coming_soon",
+      category: "CRM",
+    },
+    {
+      name: "Mailchimp",
+      icon: "📧",
+      desc: "Trigger email sequences based on audit insights",
+      status: "coming_soon",
+      category: "Email",
+    },
+    {
+      name: "Zapier",
+      icon: "⚡",
+      desc: "Connect 5,000+ apps with no-code automation",
+      status: "coming_soon",
+      category: "Automation",
+    },
+  ];
+
   const connected = integrations.filter((i) => i.status === "connected").length;
+  const disconnected = integrations.filter(
+    (i) => i.status === "disconnected",
+  ).length;
 
   return (
     <div className="space-y-6">
@@ -114,23 +155,30 @@ export default function IntegrationsPage() {
         </div>
       </div>
 
-      {/* Connected banner */}
-      {connected < integrations.length && (
+      {disconnected > 0 && (
         <div className="flex items-center gap-3 rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3">
           <AlertCircle className="h-4 w-4 text-amber-400 shrink-0" />
           <p className="text-sm text-amber-300">
-            Connect Google Analytics and Search Console to unlock keyword
-            tracking and traffic intelligence.
+            {!hasGoogleBusiness && !hasInstagram
+              ? "Add your Google Business URL and Instagram handle in Settings to connect them."
+              : !hasGoogleBusiness
+                ? "Add your Google Business URL in Settings to connect Google Business Profile."
+                : "Add your Instagram handle in Settings to connect Instagram Business."}
           </p>
         </div>
       )}
 
-      {/* Integration grid */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {integrations.map((intg) => (
           <div
             key={intg.name}
-            className={`rounded-2xl border bg-card p-4 hover:border-indigo-500/30 transition-colors ${intg.status === "connected" ? "border-emerald-500/20" : "border-border"}`}
+            className={`rounded-2xl border bg-card p-4 transition-colors ${
+              intg.status === "connected"
+                ? "border-emerald-500/20 hover:border-emerald-500/40"
+                : intg.status === "coming_soon"
+                  ? "border-border opacity-60"
+                  : "border-border hover:border-indigo-500/30"
+            }`}
           >
             <div className="flex items-start justify-between mb-3">
               <div className="flex items-center gap-3">
@@ -150,6 +198,8 @@ export default function IntegrationsPage() {
               </div>
               {intg.status === "connected" ? (
                 <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+              ) : intg.status === "coming_soon" ? (
+                <Clock className="h-4 w-4 text-muted-foreground/50 shrink-0" />
               ) : (
                 <div className="h-2 w-2 rounded-full bg-muted mt-1 shrink-0" />
               )}
@@ -157,15 +207,22 @@ export default function IntegrationsPage() {
             <p className="text-xs text-muted-foreground leading-relaxed mb-4">
               {intg.desc}
             </p>
-            <button
-              className={`w-full rounded-xl py-2 text-xs font-semibold transition-all ${
-                intg.status === "connected"
-                  ? "border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10"
-                  : "bg-gradient-to-r from-indigo-500 to-cyan-500 text-white hover:opacity-90"
-              }`}
-            >
-              {intg.status === "connected" ? "Connected ✓" : "Connect"}
-            </button>
+            {intg.status === "connected" ? (
+              <div className="w-full rounded-xl py-2 text-xs font-semibold text-center border border-emerald-500/30 text-emerald-400">
+                Connected ✓
+              </div>
+            ) : intg.status === "coming_soon" ? (
+              <div className="w-full rounded-xl py-2 text-xs font-semibold text-center border border-border text-muted-foreground/50">
+                Coming Soon
+              </div>
+            ) : (
+              <a
+                href="/settings"
+                className="block w-full rounded-xl py-2 text-xs font-semibold text-center bg-gradient-to-r from-indigo-500 to-cyan-500 text-white hover:opacity-90 transition-opacity"
+              >
+                Connect via Settings
+              </a>
+            )}
           </div>
         ))}
       </div>
