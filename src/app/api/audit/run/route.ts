@@ -557,7 +557,7 @@ export async function POST() {
   } catch (e) {
     await db.from("audits").update({ status: "failed" }).eq("id", audit.id);
     return NextResponse.json(
-      { error: `Website analysis failed: ${String(e)}` },
+      { error: `[step:website] ${String(e)}` },
       { status: 500 },
     );
   }
@@ -596,41 +596,48 @@ export async function POST() {
       .trim();
 
     auditResult = JSON.parse(text);
-  } catch {
+  } catch (e) {
     await db.from("audits").update({ status: "failed" }).eq("id", audit.id);
     return NextResponse.json(
-      { error: "AI analysis failed. Please try again." },
+      { error: `[step:claude] ${String(e)}` },
       { status: 500 },
     );
   }
 
-  const dimensionRows = auditResult.dimensions.map((d) => ({
-    audit_id: audit.id,
-    name: d.name,
-    score: d.score,
-    findings: d.findings,
-    top_recommendation: d.top_recommendation,
-    impact: d.impact,
-  }));
+  try {
+    const dimensionRows = auditResult.dimensions.map((d) => ({
+      audit_id: audit.id,
+      name: d.name,
+      score: d.score,
+      findings: d.findings,
+      top_recommendation: d.top_recommendation,
+      impact: d.impact,
+    }));
 
-  await db.from("audit_dimensions").insert(dimensionRows);
+    await db.from("audit_dimensions").insert(dimensionRows);
 
-  await db
-    .from("audits")
-    .update({
-      status: "complete",
-      overall_score: auditResult.overall_score,
-      summary: auditResult.summary,
-    })
-    .eq("id", audit.id);
+    await db
+      .from("audits")
+      .update({
+        status: "complete",
+        overall_score: auditResult.overall_score,
+        summary: auditResult.summary,
+      })
+      .eq("id", audit.id);
 
-  await db
-    .from("users")
-    .update({
-      audits_this_month: auditsUsed + 1,
-      audit_reset_date: sameMonth ? user.audit_reset_date : today,
-    })
-    .eq("id", user.id);
+    await db
+      .from("users")
+      .update({
+        audits_this_month: auditsUsed + 1,
+        audit_reset_date: sameMonth ? user.audit_reset_date : today,
+      })
+      .eq("id", user.id);
+  } catch (e) {
+    return NextResponse.json(
+      { error: `[step:db-write] ${String(e)}` },
+      { status: 500 },
+    );
+  }
 
   const myStats: CompetitorAnalysis = {
     url: business.website_url,
