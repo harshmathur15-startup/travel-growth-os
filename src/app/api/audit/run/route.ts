@@ -590,10 +590,15 @@ export async function POST() {
 
     const raw =
       message.content[0].type === "text" ? message.content[0].text : "";
-    const text = raw
+    // Strip code fences, then extract only the outermost JSON object
+    // (handles Claude adding preamble or trailing commentary)
+    let text = raw
       .replace(/^```(?:json)?\s*/i, "")
       .replace(/\s*```$/i, "")
       .trim();
+    const first = text.indexOf("{");
+    const last = text.lastIndexOf("}");
+    if (first !== -1 && last > first) text = text.slice(first, last + 1);
 
     auditResult = JSON.parse(text);
   } catch (e) {
