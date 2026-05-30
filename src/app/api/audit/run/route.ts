@@ -4,38 +4,351 @@ import Anthropic from "@anthropic-ai/sdk";
 import { createServerSupabase } from "@/lib/supabase-server";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-
 const FREE_AUDIT_LIMIT = 2;
 
-async function fetchWebsiteContent(url: string): Promise<string> {
+type WebsiteSignals = {
+  reachable: boolean;
+  https: boolean;
+  finalUrl: string;
+  title: string;
+  metaDescription: string;
+  h1s: string[];
+  h2s: string[];
+  hasViewportMeta: boolean;
+  hasSchemaMarkup: boolean;
+  hasSitemap: boolean;
+  hasWhatsApp: boolean;
+  hasPhone: boolean;
+  hasEmail: boolean;
+  hasBookingCTA: boolean;
+  hasPricing: boolean;
+  hasTestimonials: boolean;
+  hasGoogleReviews: boolean;
+  hasFacebookPixel: boolean;
+  hasGoogleAnalytics: boolean;
+  socialLinksFound: string[];
+  destinationMentions: string[];
+  wordCount: number;
+  pageTextExcerpt: string;
+  subPagesChecked: string[];
+};
+
+type SocialSignals = {
+  instagramReachable: boolean;
+  instagramHasContent: boolean;
+  googleBusinessReachable: boolean;
+};
+
+const BOOKING_KEYWORDS =
+  /book\s*now|enquire|enquiry|get\s*quote|request\s*quote|contact\s*us|call\s*us|whatsapp|book\s*tour|plan\s*trip|start\s*planning/i;
+const PRICING_KEYWORDS =
+  /₹|inr|price|pricing|package|cost|rate|starting\s*from|per\s*person/i;
+const TESTIMONIAL_KEYWORDS =
+  /testimonial|review|said|rated|stars|feedback|customer|client|traveller/i;
+const GOOGLE_REVIEW_KEYWORDS =
+  /google\s*review|google\s*rating|maps\.google|goo\.gl/i;
+const DESTINATION_KEYWORDS =
+  /goa|kerala|rajasthan|himachal|ladakh|kashmir|manali|shimla|jaipur|udaipur|andaman|lakshadweep|bali|thailand|dubai|europe|singapore|maldives|spiti|uttarakhand|sikkim|meghalaya/gi;
+const SOCIAL_PLATFORMS =
+  /instagram|facebook|youtube|twitter|linkedin|pinterest/gi;
+
+async function fetchHtml(
+  url: string,
+  timeoutMs = 10000,
+): Promise<{ html: string; finalUrl: string; ok: boolean }> {
   try {
     const res = await fetch(url, {
-      headers: { "User-Agent": "GrowthOS-Audit-Bot/1.0" },
-      signal: AbortSignal.timeout(8000),
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (compatible; TravelGrowthOS-Audit/2.0; +https://travel-growth-os.vercel.app)",
+        Accept:
+          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-IN,en;q=0.9",
+      },
+      redirect: "follow",
+      signal: AbortSignal.timeout(timeoutMs),
     });
     const html = await res.text();
-    // Strip tags, collapse whitespace, limit to 4000 chars
-    const text = html
-      .replace(/<script[\s\S]*?<\/script>/gi, "")
-      .replace(/<style[\s\S]*?<\/style>/gi, "")
-      .replace(/<[^>]+>/g, " ")
-      .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, 4000);
-    return text;
+    return { html, finalUrl: res.url, ok: res.ok };
   } catch {
-    return "";
+    return { html: "", finalUrl: url, ok: false };
   }
 }
 
-export async function POST(req: Request) {
+function extractText(html: string): string {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractMeta(html: string, name: string): string {
+  const m =
+    html.match(
+      new RegExp(
+        `<meta[^>]+name=["']${name}["'][^>]+content=["']([^"']+)["']`,
+        "i",
+      ),
+    ) ||
+    html.match(
+      new RegExp(
+        `<meta[^>]+content=["']([^"']+)["'][^>]+name=["']${name}["']`,
+        "i",
+      ),
+    );
+  return m?.[1]?.trim() ?? "";
+}
+
+function extractAll(html: string, pattern: RegExp): string[] {
+  return [...html.matchAll(pattern)]
+    .map((m) => m[1]?.trim())
+    .filter(Boolean) as string[];
+}
+
+async function analyzeWebsite(rawUrl: string): Promise<WebsiteSignals> {
+  const url = rawUrl.startsWith("http") ? rawUrl : `https://${rawUrl}`;
+
+  const { html: homeHtml, finalUrl, ok } = await fetchHtml(url);
+
+  if (!ok || !homeHtml) {
+    return {
+      reachable: false,
+      https: url.startsWith("https"),
+      finalUrl: url,
+      title: "",
+      metaDescription: "",
+      h1s: [],
+      h2s: [],
+      hasViewportMeta: false,
+      hasSchemaMarkup: false,
+      hasSitemap: false,
+      hasWhatsApp: false,
+      hasPhone: false,
+      hasEmail: false,
+      hasBookingCTA: false,
+      hasPricing: false,
+      hasTestimonials: false,
+      hasGoogleReviews: false,
+      hasFacebookPixel: false,
+      hasGoogleAnalytics: false,
+      socialLinksFound: [],
+      destinationMentions: [],
+      wordCount: 0,
+      pageTextExcerpt: "",
+      subPagesChecked: [],
+    };
+  }
+
+  // Fetch /contact and /about in parallel for more signals
+  const [contactResult, aboutResult, sitemapResult] = await Promise.all([
+    fetchHtml(`${new URL(finalUrl).origin}/contact`, 5000),
+    fetchHtml(`${new URL(finalUrl).origin}/about`, 5000),
+    fetchHtml(`${new URL(finalUrl).origin}/sitemap.xml`, 5000),
+  ]);
+
+  const combinedHtml =
+    homeHtml +
+    (contactResult.ok ? contactResult.html : "") +
+    (aboutResult.ok ? aboutResult.html : "");
+
+  const pageText = extractText(combinedHtml);
+  const words = pageText.split(/\s+/).filter(Boolean);
+
+  const title =
+    homeHtml.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1]?.trim() ?? "";
+  const metaDescription = extractMeta(homeHtml, "description");
+  const h1s = extractAll(homeHtml, /<h1[^>]*>([^<]{3,100})<\/h1>/gi).slice(
+    0,
+    5,
+  );
+  const h2s = extractAll(homeHtml, /<h2[^>]*>([^<]{3,100})<\/h2>/gi).slice(
+    0,
+    8,
+  );
+
+  const socialLinksRaw = [
+    ...combinedHtml.matchAll(
+      /href=["'](https?:\/\/(?:www\.)?(instagram|facebook|youtube|twitter|linkedin)\.com[^"'\s]*)/gi,
+    ),
+  ].map((m) => m[1]);
+  const socialLinksFound = [...new Set(socialLinksRaw)].slice(0, 6);
+
+  const destinationMatches = pageText.match(DESTINATION_KEYWORDS) ?? [];
+  const destinationMentions = [
+    ...new Set(destinationMatches.map((d) => d.toLowerCase())),
+  ].slice(0, 10);
+
+  const subPagesChecked: string[] = [];
+  if (contactResult.ok) subPagesChecked.push("/contact");
+  if (aboutResult.ok) subPagesChecked.push("/about");
+
+  return {
+    reachable: true,
+    https: finalUrl.startsWith("https"),
+    finalUrl,
+    title,
+    metaDescription,
+    h1s,
+    h2s,
+    hasViewportMeta: /name=["']viewport["']/i.test(homeHtml),
+    hasSchemaMarkup:
+      /application\/ld\+json/i.test(homeHtml) ||
+      /itemtype=["']https?:\/\/schema\.org/i.test(homeHtml),
+    hasSitemap: sitemapResult.ok && sitemapResult.html.includes("<url>"),
+    hasWhatsApp:
+      /wa\.me|whatsapp\.com|api\.whatsapp/i.test(combinedHtml) ||
+      /whatsapp/i.test(pageText),
+    hasPhone: /tel:|(?:\+91|0)[- ]?[6-9]\d{9}|[6-9]\d{9}/i.test(combinedHtml),
+    hasEmail: /mailto:|[\w.-]+@[\w.-]+\.\w{2,}/i.test(combinedHtml),
+    hasBookingCTA: BOOKING_KEYWORDS.test(pageText),
+    hasPricing: PRICING_KEYWORDS.test(pageText),
+    hasTestimonials: TESTIMONIAL_KEYWORDS.test(pageText),
+    hasGoogleReviews: GOOGLE_REVIEW_KEYWORDS.test(combinedHtml),
+    hasFacebookPixel: /fbq\(|facebook\.com\/tr/i.test(combinedHtml),
+    hasGoogleAnalytics:
+      /gtag\(|google-analytics|GA_MEASUREMENT_ID|googletagmanager/i.test(
+        combinedHtml,
+      ),
+    socialLinksFound,
+    destinationMentions,
+    wordCount: words.length,
+    pageTextExcerpt: words.slice(0, 600).join(" "),
+    subPagesChecked,
+  };
+}
+
+async function checkSocialMedia(
+  instagram: string | null,
+  googleBusiness: string | null,
+): Promise<SocialSignals> {
+  const results: SocialSignals = {
+    instagramReachable: false,
+    instagramHasContent: false,
+    googleBusinessReachable: false,
+  };
+
+  const checks: Promise<void>[] = [];
+
+  if (instagram) {
+    const handle = instagram.replace(/^@/, "").trim();
+    checks.push(
+      fetchHtml(`https://www.instagram.com/${handle}/`, 6000).then(
+        ({ ok, html }) => {
+          results.instagramReachable = ok;
+          results.instagramHasContent =
+            ok && !html.includes("Sorry, this page isn't available");
+        },
+      ),
+    );
+  }
+
+  if (googleBusiness) {
+    checks.push(
+      fetchHtml(googleBusiness, 6000).then(({ ok }) => {
+        results.googleBusinessReachable = ok;
+      }),
+    );
+  }
+
+  await Promise.all(checks);
+  return results;
+}
+
+function buildPrompt(
+  business: {
+    name: string;
+    website_url: string;
+    category: string;
+    city: string;
+    instagram: string | null;
+    google_business: string | null;
+  },
+  ws: WebsiteSignals,
+  social: SocialSignals,
+): string {
+  return `You are a senior digital growth consultant specialising in Indian travel businesses. Your job is to score and give honest, specific feedback.
+
+## Business Profile
+- Name: ${business.name}
+- Category: ${business.category}
+- City: ${business.city}
+- Website: ${business.website_url}
+- Instagram handle: ${business.instagram || "Not provided"}
+- Google Business URL: ${business.google_business || "Not provided"}
+
+## Website Technical Signals (auto-detected)
+- Reachable: ${ws.reachable ? "Yes" : "NO — site could not be fetched"}
+- HTTPS/SSL: ${ws.https ? "Yes ✓" : "No ✗"}
+- Page title: ${ws.title || "MISSING"}
+- Meta description: ${ws.metaDescription || "MISSING"}
+- H1 headings found: ${ws.h1s.length > 0 ? ws.h1s.join(" | ") : "NONE"}
+- H2 headings: ${ws.h2s.length > 0 ? ws.h2s.slice(0, 5).join(" | ") : "NONE"}
+- Mobile viewport meta: ${ws.hasViewportMeta ? "Present ✓" : "MISSING ✗"}
+- Schema/structured data: ${ws.hasSchemaMarkup ? "Present ✓" : "Missing ✗"}
+- XML Sitemap: ${ws.hasSitemap ? "Found ✓" : "Not found ✗"}
+- Word count across pages: ${ws.wordCount} words
+- Sub-pages crawled: ${ws.subPagesChecked.length > 0 ? ws.subPagesChecked.join(", ") : "none accessible"}
+
+## Conversion & Contact Signals
+- WhatsApp link/button: ${ws.hasWhatsApp ? "Present ✓" : "MISSING ✗"}
+- Phone number: ${ws.hasPhone ? "Present ✓" : "MISSING ✗"}
+- Email address: ${ws.hasEmail ? "Present ✓" : "MISSING ✗"}
+- Booking/enquiry CTA: ${ws.hasBookingCTA ? "Present ✓" : "MISSING ✗"}
+- Pricing/package info: ${ws.hasPricing ? "Present ✓" : "MISSING ✗"}
+
+## Trust & Social Proof Signals
+- Testimonials/reviews on site: ${ws.hasTestimonials ? "Present ✓" : "MISSING ✗"}
+- Google Reviews widget/link: ${ws.hasGoogleReviews ? "Present ✓" : "Missing ✗"}
+- Google Analytics: ${ws.hasGoogleAnalytics ? "Installed ✓" : "Not detected ✗"}
+- Facebook Pixel: ${ws.hasFacebookPixel ? "Installed ✓" : "Not detected ✗"}
+
+## Social Media Signals
+- Social links on website: ${ws.socialLinksFound.length > 0 ? ws.socialLinksFound.join(", ") : "None found"}
+- Instagram profile reachable: ${social.instagramReachable ? "Yes ✓" : business.instagram ? "Could not reach ✗" : "Not provided"}
+- Instagram has content: ${social.instagramHasContent ? "Yes ✓" : business.instagram ? "Possibly private or empty ✗" : "N/A"}
+- Google Business reachable: ${social.googleBusinessReachable ? "Yes ✓" : business.google_business ? "Could not reach ✗" : "Not provided"}
+
+## Content Signals
+- Destinations mentioned: ${ws.destinationMentions.length > 0 ? ws.destinationMentions.join(", ") : "None detected"}
+- Page text excerpt:
+"""
+${ws.pageTextExcerpt || "No content could be extracted"}
+"""
+
+## Scoring Instructions
+Score each dimension 0–100 based ONLY on the signals above. Do not be generous — score what the data shows:
+- SEO: title/meta/h1 presence and quality, schema markup, sitemap, HTTPS, word count
+- Conversion: WhatsApp, phone, email, booking CTA, pricing info, enquiry forms
+- Trust & Reviews: testimonials on site, Google reviews link, analytics tracking, SSL
+- Mobile & Speed: viewport meta, HTTPS, site reachability, mobile-friendly signals
+- Social Media: social links found, Instagram reachability/content, Google Business
+- Content Quality: destinations covered, word count, headings structure, pricing/package detail
+
+Return ONLY valid JSON, no markdown, no extra text:
+{
+  "overall_score": <weighted average — SEO 20%, Conversion 25%, Trust 15%, Mobile 15%, Social 10%, Content 15%>,
+  "summary": "<2-3 sentences naming specific gaps — e.g. missing WhatsApp button, no meta description, Instagram not linked>",
+  "dimensions": [
+    { "name": "SEO", "score": <0-100>, "findings": ["<specific finding based on data above>", "<specific finding>", "<specific finding>"], "top_recommendation": "<single most impactful actionable fix>", "impact": "high" },
+    { "name": "Conversion", "score": <0-100>, "findings": ["<specific finding>", "<specific finding>", "<specific finding>"], "top_recommendation": "<single most impactful fix>", "impact": "high" },
+    { "name": "Trust & Reviews", "score": <0-100>, "findings": ["<specific finding>", "<specific finding>"], "top_recommendation": "<single most impactful fix>", "impact": "medium" },
+    { "name": "Mobile & Speed", "score": <0-100>, "findings": ["<specific finding>", "<specific finding>"], "top_recommendation": "<single most impactful fix>", "impact": "high" },
+    { "name": "Social Media", "score": <0-100>, "findings": ["<specific finding>", "<specific finding>"], "top_recommendation": "<single most impactful fix>", "impact": "medium" },
+    { "name": "Content Quality", "score": <0-100>, "findings": ["<specific finding>", "<specific finding>"], "top_recommendation": "<single most impactful fix>", "impact": "medium" }
+  ]
+}`;
+}
+
+export async function POST() {
   const { userId } = await auth();
   if (!userId)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const db = createServerSupabase();
 
-  // Get user + business
   const { data: user } = await db
     .from("users")
     .select("id, plan, audits_this_month, audit_reset_date")
@@ -48,7 +361,6 @@ export async function POST(req: Request) {
       { status: 400 },
     );
 
-  // Reset monthly counter if needed
   const today = new Date().toISOString().slice(0, 10);
   const resetDate = user.audit_reset_date ?? today;
   const sameMonth =
@@ -77,7 +389,6 @@ export async function POST(req: Request) {
       { status: 400 },
     );
 
-  // Create a pending audit record
   const { data: audit, error: auditErr } = await db
     .from("audits")
     .insert({
@@ -93,78 +404,13 @@ export async function POST(req: Request) {
   if (auditErr)
     return NextResponse.json({ error: auditErr.message }, { status: 500 });
 
-  // Fetch website content
-  const websiteContent = await fetchWebsiteContent(business.website_url);
+  // Run website analysis and social checks in parallel
+  const [websiteSignals, socialSignals] = await Promise.all([
+    analyzeWebsite(business.website_url),
+    checkSocialMedia(business.instagram, business.google_business),
+  ]);
 
-  // Build Claude prompt
-  const prompt = `You are a senior digital marketing consultant specialising in Indian travel businesses.
-
-Analyse the following travel agency and return a structured JSON audit.
-
-Business details:
-- Name: ${business.name}
-- Website: ${business.website_url}
-- Category: ${business.category}
-- City: ${business.city}
-- Instagram: ${business.instagram || "Not provided"}
-- Google Business: ${business.google_business || "Not provided"}
-
-Website content (scraped):
-"""
-${websiteContent || "Could not fetch website content — base your analysis on the URL and business details provided."}
-"""
-
-Return ONLY valid JSON, no extra text, in this exact format:
-{
-  "overall_score": <number 0-100>,
-  "summary": "<2-3 sentence plain-English summary of the biggest opportunities>",
-  "dimensions": [
-    {
-      "name": "SEO",
-      "score": <0-100>,
-      "findings": ["<finding 1>", "<finding 2>", "<finding 3>"],
-      "top_recommendation": "<single most impactful fix>",
-      "impact": "high"
-    },
-    {
-      "name": "Conversion",
-      "score": <0-100>,
-      "findings": ["<finding 1>", "<finding 2>", "<finding 3>"],
-      "top_recommendation": "<single most impactful fix>",
-      "impact": "high"
-    },
-    {
-      "name": "Trust & Reviews",
-      "score": <0-100>,
-      "findings": ["<finding 1>", "<finding 2>"],
-      "top_recommendation": "<single most impactful fix>",
-      "impact": "medium"
-    },
-    {
-      "name": "Mobile & Speed",
-      "score": <0-100>,
-      "findings": ["<finding 1>", "<finding 2>"],
-      "top_recommendation": "<single most impactful fix>",
-      "impact": "high"
-    },
-    {
-      "name": "Social Media",
-      "score": <0-100>,
-      "findings": ["<finding 1>", "<finding 2>"],
-      "top_recommendation": "<single most impactful fix>",
-      "impact": "medium"
-    },
-    {
-      "name": "Content Quality",
-      "score": <0-100>,
-      "findings": ["<finding 1>", "<finding 2>"],
-      "top_recommendation": "<single most impactful fix>",
-      "impact": "medium"
-    }
-  ]
-}
-
-Scoring guide: 80-100 = excellent, 60-79 = needs work, 0-59 = critical issues. Be specific and actionable. Focus on what will generate more bookings and leads for an Indian travel business.`;
+  const prompt = buildPrompt(business, websiteSignals, socialSignals);
 
   let auditResult: {
     overall_score: number;
@@ -187,15 +433,13 @@ Scoring guide: 80-100 = excellent, 60-79 = needs work, 0-59 = critical issues. B
 
     const raw =
       message.content[0].type === "text" ? message.content[0].text : "";
-
-    // Strip markdown code fences if Claude wraps the JSON
     const text = raw
       .replace(/^```(?:json)?\s*/i, "")
       .replace(/\s*```$/i, "")
       .trim();
 
     auditResult = JSON.parse(text);
-  } catch (err) {
+  } catch {
     await db.from("audits").update({ status: "failed" }).eq("id", audit.id);
     return NextResponse.json(
       { error: "AI analysis failed. Please try again." },
@@ -203,7 +447,6 @@ Scoring guide: 80-100 = excellent, 60-79 = needs work, 0-59 = critical issues. B
     );
   }
 
-  // Save dimensions
   const dimensionRows = auditResult.dimensions.map((d) => ({
     audit_id: audit.id,
     name: d.name,
@@ -215,7 +458,6 @@ Scoring guide: 80-100 = excellent, 60-79 = needs work, 0-59 = critical issues. B
 
   await db.from("audit_dimensions").insert(dimensionRows);
 
-  // Update audit as complete
   await db
     .from("audits")
     .update({
@@ -225,7 +467,6 @@ Scoring guide: 80-100 = excellent, 60-79 = needs work, 0-59 = critical issues. B
     })
     .eq("id", audit.id);
 
-  // Increment monthly counter
   await db
     .from("users")
     .update({
