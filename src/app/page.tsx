@@ -14,10 +14,8 @@ import {
   Shield,
   Smartphone,
   FileText,
-  Users,
   ChevronRight,
   Sparkles,
-  MapPin,
   IndianRupee,
   Camera,
   Building2,
@@ -348,21 +346,32 @@ export default async function HomePage() {
           <div className="mx-auto max-w-3xl text-center">
             <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-indigo-500/30 bg-indigo-500/10 px-4 py-1.5 text-xs font-medium text-indigo-400">
               <Sparkles className="h-3 w-3" />
-              India&apos;s first influencer-led travel marketplace
+              AI growth platform for Indian travel businesses
             </div>
             <h1 className="text-5xl font-extrabold leading-tight tracking-tight text-foreground sm:text-6xl">
-              Travel Sells Better
+              Grow Your Travel Business.
               <span className="block bg-gradient-to-r from-indigo-400 to-cyan-400 bg-clip-text text-transparent">
-                Through Creators
+                Without Burning on Ads.
               </span>
             </h1>
             <p className="mx-auto mt-6 max-w-2xl text-lg text-muted-foreground leading-relaxed">
-              Agencies post packages. Creators promote to their audience.
-              Travelers book.
-              <br className="hidden sm:block" />
-              Real attribution. No ad spend. Zero manual coordination.
+              Two growth engines in one platform — an AI audit that fixes
+              what&apos;s killing your bookings, and a creator network that
+              brings inbound leads to your doorstep.
             </p>
-            <p className="mt-3 text-sm text-muted-foreground">Who are you?</p>
+            <div className="mt-4 flex flex-col items-center gap-2 sm:flex-row sm:justify-center sm:gap-5 text-sm text-muted-foreground">
+              <span className="flex items-center gap-1.5">
+                <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+                Agencies: more bookings, zero ad spend
+              </span>
+              <span className="flex items-center gap-1.5">
+                <CheckCircle2 className="h-4 w-4 text-pink-400 shrink-0" />
+                Creators: earn commission promoting trips you love
+              </span>
+            </div>
+            <p className="mt-6 text-sm font-medium text-muted-foreground">
+              I am a…
+            </p>
 
             {/* Dual CTA */}
             <div className="mt-4 flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
