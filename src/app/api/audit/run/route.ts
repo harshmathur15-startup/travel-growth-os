@@ -181,15 +181,21 @@ Scoring guide: 80-100 = excellent, 60-79 = needs work, 0-59 = critical issues. B
   try {
     const message = await anthropic.messages.create({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 1024,
+      max_tokens: 2048,
       messages: [{ role: "user", content: prompt }],
     });
 
-    const text =
+    const raw =
       message.content[0].type === "text" ? message.content[0].text : "";
+
+    // Strip markdown code fences if Claude wraps the JSON
+    const text = raw
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/\s*```$/i, "")
+      .trim();
+
     auditResult = JSON.parse(text);
   } catch (err) {
-    // Mark audit as failed
     await db.from("audits").update({ status: "failed" }).eq("id", audit.id);
     return NextResponse.json(
       { error: "AI analysis failed. Please try again." },
