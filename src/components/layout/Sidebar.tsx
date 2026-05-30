@@ -14,6 +14,7 @@ import {
   TrendingUp,
   Zap,
   ChevronRight,
+  Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -24,6 +25,7 @@ const navItems = [
   { label: "Competitors", href: "/competitors", icon: BarChart3 },
   { label: "AI Agents", href: "/ai-agents", icon: Bot },
   { label: "Reports", href: "/reports", icon: FileText },
+  { label: "Creator Hub", href: "/creators", icon: Sparkles },
   { label: "Integrations", href: "/integrations", icon: Plug },
   { label: "Settings", href: "/settings", icon: Settings },
 ];
