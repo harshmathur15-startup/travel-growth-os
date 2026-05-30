@@ -3,8 +3,6 @@ import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { createServerSupabase } from "@/lib/supabase-server";
 
-export const maxDuration = 60;
-
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const FREE_AUDIT_LIMIT = 10;
 
@@ -39,18 +37,6 @@ type SocialSignals = {
   instagramReachable: boolean;
   instagramHasContent: boolean;
   googleBusinessReachable: boolean;
-};
-
-type PageSpeedMetrics = {
-  score: number;
-  lcp: number;
-  cls: number;
-  fcp: number;
-};
-
-type PageSpeedData = {
-  mobile: PageSpeedMetrics | null;
-  desktop: PageSpeedMetrics | null;
 };
 
 type CompetitorAnalysis = {
@@ -285,53 +271,6 @@ async function checkSocialMedia(
   return results;
 }
 
-async function fetchPageSpeed(url: string): Promise<PageSpeedData> {
-  const apiKey = process.env.GOOGLE_PAGESPEED_API_KEY;
-  const base = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed";
-
-  const run = async (
-    strategy: "mobile" | "desktop",
-  ): Promise<PageSpeedMetrics | null> => {
-    try {
-      const params = new URLSearchParams({
-        url,
-        strategy,
-        category: "performance",
-      });
-      if (apiKey) params.set("key", apiKey);
-      const res = await fetch(`${base}?${params}`, {
-        signal: AbortSignal.timeout(20000),
-      });
-      if (!res.ok) return null;
-      const j = await res.json();
-      const cats = j.lighthouseResult?.categories;
-      const audits = j.lighthouseResult?.audits;
-      if (!cats?.performance) return null;
-      return {
-        score: Math.round((cats.performance.score ?? 0) * 100),
-        lcp: parseFloat(
-          (
-            (audits?.["largest-contentful-paint"]?.numericValue ?? 0) / 1000
-          ).toFixed(1),
-        ),
-        cls: parseFloat(
-          (audits?.["cumulative-layout-shift"]?.numericValue ?? 0).toFixed(3),
-        ),
-        fcp: parseFloat(
-          (
-            (audits?.["first-contentful-paint"]?.numericValue ?? 0) / 1000
-          ).toFixed(1),
-        ),
-      };
-    } catch {
-      return null;
-    }
-  };
-
-  const [mobile, desktop] = await Promise.all([run("mobile"), run("desktop")]);
-  return { mobile, desktop };
-}
-
 function calcEstimatedScore(ws: WebsiteSignals): number {
   let score = 0;
   if (ws.https) score += 10;
@@ -441,20 +380,8 @@ function buildPrompt(
   },
   ws: WebsiteSignals,
   social: SocialSignals,
-  pagespeed: PageSpeedData,
   competitors: CompetitorAnalysis[],
 ): string {
-  const psSection = `
-## Page Speed Performance (Google PageSpeed Insights — Real Measured Data)
-Mobile score: ${pagespeed.mobile?.score ?? "Could not fetch"}/100
-${pagespeed.mobile ? `  • LCP: ${pagespeed.mobile.lcp}s ${pagespeed.mobile.lcp <= 2.5 ? "(Good ✓)" : pagespeed.mobile.lcp <= 4 ? "(Needs Improvement ⚠)" : "(Poor ✗)"}` : ""}
-${pagespeed.mobile ? `  • CLS: ${pagespeed.mobile.cls} ${pagespeed.mobile.cls <= 0.1 ? "(Good ✓)" : pagespeed.mobile.cls <= 0.25 ? "(Needs Improvement ⚠)" : "(Poor ✗)"}` : ""}
-${pagespeed.mobile ? `  • FCP: ${pagespeed.mobile.fcp}s` : ""}
-Desktop score: ${pagespeed.desktop?.score ?? "Could not fetch"}/100
-${pagespeed.desktop ? `  • LCP: ${pagespeed.desktop.lcp}s` : ""}
-${pagespeed.desktop ? `  • CLS: ${pagespeed.desktop.cls}` : ""}
-(Benchmarks: LCP ≤2.5s = good, CLS ≤0.1 = good)`;
-
   const compSection =
     competitors.length === 0
       ? "\n## Competitor Benchmarks\nNo competitors configured. Skip comparative recommendations."
@@ -523,7 +450,6 @@ When competitors have a signal that the audited business lacks, name it explicit
 """
 ${ws.pageTextExcerpt || "No content could be extracted"}
 """
-${psSection}
 ${compSection}
 
 ## Scoring Instructions
@@ -531,7 +457,7 @@ Score each dimension 0–100 based ONLY on the signals above. Do not be generous
 - SEO: title/meta/h1 presence and quality, schema markup, sitemap, HTTPS, word count
 - Conversion: WhatsApp, phone, email, booking CTA, pricing info, enquiry forms
 - Trust & Reviews: testimonials on site, Google reviews link, analytics tracking, SSL
-- Mobile & Speed: USE the Google PageSpeed mobile score as the primary input. If mobile PageSpeed score is available, weight it heavily (70%) alongside viewport meta and HTTPS signals (30%).
+- Mobile & Speed: Score based on viewport meta tag presence, HTTPS, site reachability, and mobile-friendly signals detected in the HTML.
 - Social Media: social links found, Instagram reachability/content, Google Business
 - Content Quality: destinations covered, word count, headings structure, pricing/package detail
 
@@ -620,17 +546,14 @@ export async function POST() {
 
   let websiteSignals: WebsiteSignals;
   let socialSignals: SocialSignals;
-  let pageSpeedData: PageSpeedData;
   let competitorData: CompetitorAnalysis[];
 
   try {
-    [websiteSignals, socialSignals, pageSpeedData, competitorData] =
-      await Promise.all([
-        analyzeWebsite(business.website_url),
-        checkSocialMedia(business.instagram, business.google_business),
-        fetchPageSpeed(business.website_url),
-        Promise.all(competitorUrls.map(analyzeCompetitorBasic)),
-      ]);
+    [websiteSignals, socialSignals, competitorData] = await Promise.all([
+      analyzeWebsite(business.website_url),
+      checkSocialMedia(business.instagram, business.google_business),
+      Promise.all(competitorUrls.map(analyzeCompetitorBasic)),
+    ]);
   } catch (e) {
     await db.from("audits").update({ status: "failed" }).eq("id", audit.id);
     return NextResponse.json(
@@ -643,7 +566,6 @@ export async function POST() {
     business,
     websiteSignals,
     socialSignals,
-    pageSpeedData,
     competitorData,
   );
 
@@ -733,7 +655,6 @@ export async function POST() {
     overall_score: auditResult.overall_score,
     summary: auditResult.summary,
     dimensions: auditResult.dimensions,
-    pagespeed: pageSpeedData,
     competitors: competitorData,
     myStats,
   });

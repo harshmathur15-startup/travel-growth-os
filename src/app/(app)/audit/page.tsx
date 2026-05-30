@@ -50,12 +50,13 @@ type AuditResult = {
   overall_score: number;
   summary: string;
   dimensions: Dimension[];
-  pagespeed?: {
-    mobile: PageSpeedMetrics | null;
-    desktop: PageSpeedMetrics | null;
-  };
   competitors?: CompetitorSummary[];
   myStats?: CompetitorSummary;
+};
+
+type PageSpeedData = {
+  mobile: PageSpeedMetrics | null;
+  desktop: PageSpeedMetrics | null;
 };
 
 const auditSteps = [
@@ -63,7 +64,6 @@ const auditSteps = [
   "Analysing SEO & meta tags…",
   "Checking conversion signals…",
   "Reviewing trust & credibility…",
-  "Running PageSpeed analysis…",
   "Scanning competitor websites…",
   "Evaluating content quality…",
   "Generating AI recommendations…",
@@ -163,12 +163,27 @@ export default function AuditPage() {
   );
   const [stepIndex, setStepIndex] = useState(0);
   const [result, setResult] = useState<AuditResult | null>(null);
+  const [pagespeed, setPagespeed] = useState<PageSpeedData | null>(null);
+  const [pagespeedLoading, setPagespeedLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [isLimitError, setIsLimitError] = useState(false);
+
+  const fetchPageSpeed = async () => {
+    setPagespeedLoading(true);
+    try {
+      const res = await fetch("/api/audit/pagespeed");
+      if (res.ok) setPagespeed(await res.json());
+    } catch {
+      // PageSpeed is optional — silent failure is fine
+    } finally {
+      setPagespeedLoading(false);
+    }
+  };
 
   const handleRun = async () => {
     setStep("running");
     setStepIndex(0);
+    setPagespeed(null);
 
     const interval = setInterval(() => {
       setStepIndex((i) => (i < auditSteps.length - 1 ? i + 1 : i));
@@ -192,6 +207,7 @@ export default function AuditPage() {
 
       setResult(data);
       setStep("done");
+      fetchPageSpeed();
     } catch {
       clearInterval(interval);
       setErrorMsg("Network error. Please check your connection and try again.");
@@ -226,8 +242,7 @@ export default function AuditPage() {
               Generate AI Audit Now
             </button>
             <p className="text-center text-[11px] text-muted-foreground mt-3">
-              Takes ~30 seconds · Analyses 6 growth dimensions + PageSpeed +
-              competitors
+              Takes ~20 seconds · PageSpeed loads separately after
             </p>
             <div className="mt-5 border-t border-border pt-4">
               <p className="text-xs text-muted-foreground">
@@ -371,90 +386,97 @@ export default function AuditPage() {
           </div>
 
           {/* PageSpeed */}
-          {result.pagespeed &&
-            (result.pagespeed.mobile || result.pagespeed.desktop) && (
-              <div className="rounded-2xl border border-border bg-card p-6">
-                <div className="flex items-center gap-2 mb-4">
-                  <h3 className="text-sm font-semibold text-foreground">
-                    Page Speed Performance
-                  </h3>
-                  <span className="text-[10px] text-muted-foreground bg-muted/30 rounded-full px-2 py-0.5">
-                    via Google PageSpeed Insights
-                  </span>
-                </div>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  {(
-                    [
-                      {
-                        label: "Mobile",
-                        data: result.pagespeed.mobile,
-                        Icon: Smartphone,
-                      },
-                      {
-                        label: "Desktop",
-                        data: result.pagespeed.desktop,
-                        Icon: Monitor,
-                      },
-                    ] as const
-                  ).map(({ label, data, Icon }) => (
-                    <div
-                      key={label}
-                      className="rounded-xl border border-border bg-muted/10 p-4"
-                    >
-                      <div className="flex items-center justify-between mb-3">
-                        <div className="flex items-center gap-1.5">
-                          <Icon className="h-3.5 w-3.5 text-muted-foreground" />
-                          <span className="text-xs font-semibold text-foreground">
-                            {label}
-                          </span>
-                        </div>
-                        {data ? (
-                          <span
-                            className="text-2xl font-black tabular-nums"
-                            style={{ color: scoreColor(data.score) }}
-                          >
-                            {data.score}
-                          </span>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">
-                            N/A
-                          </span>
-                        )}
+          {pagespeedLoading && !pagespeed && (
+            <div className="rounded-2xl border border-border bg-card p-4 flex items-center gap-3">
+              <Loader2 className="h-4 w-4 text-indigo-400 animate-spin shrink-0" />
+              <p className="text-sm text-muted-foreground">
+                Fetching PageSpeed data…
+              </p>
+            </div>
+          )}
+          {pagespeed && (pagespeed.mobile || pagespeed.desktop) && (
+            <div className="rounded-2xl border border-border bg-card p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <h3 className="text-sm font-semibold text-foreground">
+                  Page Speed Performance
+                </h3>
+                <span className="text-[10px] text-muted-foreground bg-muted/30 rounded-full px-2 py-0.5">
+                  via Google PageSpeed Insights
+                </span>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                {(
+                  [
+                    {
+                      label: "Mobile",
+                      data: pagespeed.mobile,
+                      Icon: Smartphone,
+                    },
+                    {
+                      label: "Desktop",
+                      data: pagespeed.desktop,
+                      Icon: Monitor,
+                    },
+                  ] as const
+                ).map(({ label, data, Icon }) => (
+                  <div
+                    key={label}
+                    className="rounded-xl border border-border bg-muted/10 p-4"
+                  >
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-1.5">
+                        <Icon className="h-3.5 w-3.5 text-muted-foreground" />
+                        <span className="text-xs font-semibold text-foreground">
+                          {label}
+                        </span>
                       </div>
                       {data ? (
-                        <div className="space-y-1.5">
-                          <MetricRow
-                            label="LCP"
-                            value={`${data.lcp}s`}
-                            good={data.lcp <= 2.5}
-                            warn={data.lcp <= 4}
-                          />
-                          <MetricRow
-                            label="CLS"
-                            value={`${data.cls}`}
-                            good={data.cls <= 0.1}
-                            warn={data.cls <= 0.25}
-                          />
-                          <MetricRow
-                            label="FCP"
-                            value={`${data.fcp}s`}
-                            good={data.fcp <= 1.8}
-                            warn={data.fcp <= 3}
-                          />
-                        </div>
+                        <span
+                          className="text-2xl font-black tabular-nums"
+                          style={{ color: scoreColor(data.score) }}
+                        >
+                          {data.score}
+                        </span>
                       ) : (
-                        <p className="text-xs text-muted-foreground">
-                          Could not fetch PageSpeed data
-                        </p>
+                        <span className="text-xs text-muted-foreground">
+                          N/A
+                        </span>
                       )}
                     </div>
-                  ))}
-                </div>
-                <p className="mt-3 text-[10px] text-muted-foreground">
-                  LCP ≤2.5s · CLS ≤0.1 · FCP ≤1.8s = Good (green)
-                </p>
+                    {data ? (
+                      <div className="space-y-1.5">
+                        <MetricRow
+                          label="LCP"
+                          value={`${data.lcp}s`}
+                          good={data.lcp <= 2.5}
+                          warn={data.lcp <= 4}
+                        />
+                        <MetricRow
+                          label="CLS"
+                          value={`${data.cls}`}
+                          good={data.cls <= 0.1}
+                          warn={data.cls <= 0.25}
+                        />
+                        <MetricRow
+                          label="FCP"
+                          value={`${data.fcp}s`}
+                          good={data.fcp <= 1.8}
+                          warn={data.fcp <= 3}
+                        />
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        Could not fetch PageSpeed data
+                      </p>
+                    )}
+                  </div>
+                ))}
               </div>
-            )}
+              <p className="mt-3 text-[10px] text-muted-foreground">
+                LCP ≤2.5s · CLS ≤0.1 · FCP ≤1.8s = Good (green)
+              </p>
+            </div>
+          )}
 
           {/* Competitor comparison */}
           {result.myStats &&
