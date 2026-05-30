@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { SignedIn, SignedOut } from "@clerk/nextjs";
 import {
   TrendingUp,
   Zap,
@@ -282,19 +283,30 @@ export default function HomePage() {
             ))}
           </nav>
           <div className="flex items-center gap-3">
-            <Link
-              href="/auth/login"
-              className="hidden text-sm font-medium text-muted-foreground hover:text-foreground transition-colors sm:block"
-            >
-              Sign in
-            </Link>
-            <Link
-              href="/auth/signup"
-              className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-indigo-500 to-cyan-500 px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition-opacity"
-            >
-              Free Audit
-              <ArrowRight className="h-3.5 w-3.5" />
-            </Link>
+            <SignedOut>
+              <Link
+                href="/auth/login"
+                className="hidden text-sm font-medium text-muted-foreground hover:text-foreground transition-colors sm:block"
+              >
+                Sign in
+              </Link>
+              <Link
+                href="/auth/signup"
+                className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-indigo-500 to-cyan-500 px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition-opacity"
+              >
+                Free Audit
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Link>
+            </SignedOut>
+            <SignedIn>
+              <Link
+                href="/dashboard"
+                className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-indigo-500 to-cyan-500 px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition-opacity"
+              >
+                Go to Dashboard
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Link>
+            </SignedIn>
           </div>
         </div>
       </header>
