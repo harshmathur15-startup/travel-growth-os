@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { SignedIn, SignedOut } from "@clerk/nextjs";
+import { auth } from "@clerk/nextjs/server";
 import {
   TrendingUp,
   Zap,
@@ -257,7 +257,8 @@ const plans = [
   },
 ];
 
-export default function HomePage() {
+export default async function HomePage() {
+  const { userId } = await auth();
   return (
     <div className="min-h-screen bg-background text-foreground">
       {/* Navbar */}
@@ -283,22 +284,7 @@ export default function HomePage() {
             ))}
           </nav>
           <div className="flex items-center gap-3">
-            <SignedOut>
-              <Link
-                href="/auth/login"
-                className="hidden text-sm font-medium text-muted-foreground hover:text-foreground transition-colors sm:block"
-              >
-                Sign in
-              </Link>
-              <Link
-                href="/auth/signup"
-                className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-indigo-500 to-cyan-500 px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition-opacity"
-              >
-                Free Audit
-                <ArrowRight className="h-3.5 w-3.5" />
-              </Link>
-            </SignedOut>
-            <SignedIn>
+            {userId ? (
               <Link
                 href="/dashboard"
                 className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-indigo-500 to-cyan-500 px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition-opacity"
@@ -306,7 +292,23 @@ export default function HomePage() {
                 Go to Dashboard
                 <ArrowRight className="h-3.5 w-3.5" />
               </Link>
-            </SignedIn>
+            ) : (
+              <>
+                <Link
+                  href="/auth/login"
+                  className="hidden text-sm font-medium text-muted-foreground hover:text-foreground transition-colors sm:block"
+                >
+                  Sign in
+                </Link>
+                <Link
+                  href="/auth/signup"
+                  className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-indigo-500 to-cyan-500 px-4 py-2 text-sm font-semibold text-white hover:opacity-90 transition-opacity"
+                >
+                  Free Audit
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </Link>
+              </>
+            )}
           </div>
         </div>
       </header>
