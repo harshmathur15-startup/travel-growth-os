@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { createServerSupabase } from "@/lib/supabase-server";
 
+export const maxDuration = 60;
+
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const FREE_AUDIT_LIMIT = 10;
 
@@ -298,7 +300,7 @@ async function fetchPageSpeed(url: string): Promise<PageSpeedData> {
       });
       if (apiKey) params.set("key", apiKey);
       const res = await fetch(`${base}?${params}`, {
-        signal: AbortSignal.timeout(28000),
+        signal: AbortSignal.timeout(20000),
       });
       if (!res.ok) return null;
       const j = await res.json();
@@ -349,23 +351,82 @@ async function analyzeCompetitorBasic(
   rawUrl: string,
 ): Promise<CompetitorAnalysis> {
   const url = rawUrl.trim();
-  const ws = await analyzeWebsite(url);
+  const fullUrl = url.startsWith("http") ? url : `https://${url}`;
+  const { html, finalUrl, ok } = await fetchHtml(fullUrl, 8000);
+
+  if (!ok || !html) {
+    return {
+      url,
+      reachable: false,
+      https: fullUrl.startsWith("https"),
+      hasWhatsApp: false,
+      hasPhone: false,
+      hasEmail: false,
+      hasTestimonials: false,
+      hasGoogleAnalytics: false,
+      hasFacebookPixel: false,
+      hasBookingCTA: false,
+      hasPricing: false,
+      socialLinksFound: [],
+      wordCount: 0,
+      estimatedScore: 0,
+      destinationMentions: [],
+    };
+  }
+
+  const pageText = extractText(html);
+  const words = pageText.split(/\s+/).filter(Boolean);
+  const metaDescription = extractMeta(html, "description");
+  const socialLinksRaw = [
+    ...html.matchAll(
+      /href=["'](https?:\/\/(?:www\.)?(instagram|facebook|youtube|twitter|linkedin)\.com[^"'\s]*)/gi,
+    ),
+  ].map((m) => m[1]);
+  const socialLinksFound = [...new Set(socialLinksRaw)].slice(0, 6);
+  const destinationMatches = pageText.match(DESTINATION_KEYWORDS) ?? [];
+  const destinationMentions = [
+    ...new Set(destinationMatches.map((d) => d.toLowerCase())),
+  ].slice(0, 10);
+
+  const signals = {
+    https: finalUrl.startsWith("https"),
+    hasViewportMeta: /name=["']viewport["']/i.test(html),
+    metaDescription,
+    hasPhone: /tel:|(?:\+91|0)[- ]?[6-9]\d{9}|[6-9]\d{9}/i.test(html),
+    hasEmail: /mailto:|[\w.-]+@[\w.-]+\.\w{2,}/i.test(html),
+    hasWhatsApp:
+      /wa\.me|whatsapp\.com|api\.whatsapp/i.test(html) ||
+      /whatsapp/i.test(pageText),
+    hasBookingCTA: BOOKING_KEYWORDS.test(pageText),
+    hasPricing: PRICING_KEYWORDS.test(pageText),
+    hasTestimonials: TESTIMONIAL_KEYWORDS.test(pageText),
+    hasGoogleAnalytics:
+      /gtag\(|google-analytics|GA_MEASUREMENT_ID|googletagmanager/i.test(html),
+    hasFacebookPixel: /fbq\(|facebook\.com\/tr/i.test(html),
+    socialLinksFound,
+  };
+
   return {
     url,
-    reachable: ws.reachable,
-    https: ws.https,
-    hasWhatsApp: ws.hasWhatsApp,
-    hasPhone: ws.hasPhone,
-    hasEmail: ws.hasEmail,
-    hasTestimonials: ws.hasTestimonials,
-    hasGoogleAnalytics: ws.hasGoogleAnalytics,
-    hasFacebookPixel: ws.hasFacebookPixel,
-    hasBookingCTA: ws.hasBookingCTA,
-    hasPricing: ws.hasPricing,
-    socialLinksFound: ws.socialLinksFound,
-    wordCount: ws.wordCount,
-    estimatedScore: calcEstimatedScore(ws),
-    destinationMentions: ws.destinationMentions,
+    reachable: true,
+    ...signals,
+    wordCount: words.length,
+    estimatedScore: calcEstimatedScore({
+      ...signals,
+      reachable: true,
+      finalUrl,
+      title: "",
+      h1s: [],
+      h2s: [],
+      hasSchemaMarkup: false,
+      hasSitemap: false,
+      hasGoogleReviews: false,
+      destinationMentions,
+      wordCount: words.length,
+      pageTextExcerpt: "",
+      subPagesChecked: [],
+    }),
+    destinationMentions,
   };
 }
 
@@ -557,13 +618,26 @@ export async function POST() {
     .filter((u: string) => u?.trim())
     .slice(0, 3);
 
-  const [websiteSignals, socialSignals, pageSpeedData, competitorData] =
-    await Promise.all([
-      analyzeWebsite(business.website_url),
-      checkSocialMedia(business.instagram, business.google_business),
-      fetchPageSpeed(business.website_url),
-      Promise.all(competitorUrls.map(analyzeCompetitorBasic)),
-    ]);
+  let websiteSignals: WebsiteSignals;
+  let socialSignals: SocialSignals;
+  let pageSpeedData: PageSpeedData;
+  let competitorData: CompetitorAnalysis[];
+
+  try {
+    [websiteSignals, socialSignals, pageSpeedData, competitorData] =
+      await Promise.all([
+        analyzeWebsite(business.website_url),
+        checkSocialMedia(business.instagram, business.google_business),
+        fetchPageSpeed(business.website_url),
+        Promise.all(competitorUrls.map(analyzeCompetitorBasic)),
+      ]);
+  } catch (e) {
+    await db.from("audits").update({ status: "failed" }).eq("id", audit.id);
+    return NextResponse.json(
+      { error: `Website analysis failed: ${String(e)}` },
+      { status: 500 },
+    );
+  }
 
   const prompt = buildPrompt(
     business,
